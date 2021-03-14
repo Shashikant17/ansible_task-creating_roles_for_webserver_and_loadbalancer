@@ -1,0 +1,75 @@
+- hosts: localhost
+  vars_files:
+          - vault.yml
+  tasks:
+   - name: "Launching ec2 Instances on AWS for HTTPD web server"
+     ec2:
+      key_name: "mykey"
+      instance_type: t2.micro
+      image: "ami-081bb417559035fe8"
+      wait: yes
+      count: 2
+      instance_tags:
+              Name: "ansible_HTTPD_Web_Server"
+      state: present
+      region: "ap-south-1"
+      group_id: "sg-035af5c9f3adccc6c"
+      aws_access_key: "{{ accesskey }}"
+      aws_secret_key: "{{ secretkey }}"
+     register: backend
+
+   - name: "Adding Web_Server instances to host group (httpdserver)"
+     add_host:
+      hostname: "{{ item.public_ip }}"
+      groupname: httpdserver
+     loop: "{{ backend.instances }}"
+
+   - name: "Launching ec2 instance for Load Balancer server"
+     ec2:
+      key_name: "mykey"
+      instance_type: t2.micro
+      image: "ami-0a9d27a9f4f5c0efc"
+      wait: yes
+      count: 1
+      instance_tags:
+                 Name: "ansible_LB_Server"
+      state: present
+      region: "ap-south-1"
+      group_id: "sg-035af5c9f3adccc6c"
+      aws_access_key: "{{ accesskey }}"
+      aws_secret_key: "{{ secretkey }}"
+     register: frontend
+
+   - name: "Adding Load_Balancer instance to host group (lbserver)"
+     add_host:
+      hostname: "{{ item.public_ip }}"
+      groupname: lbserver
+     loop: "{{ frontend.instances }}"
+
+   - name: "Waiting for SSH service in HTTPD_Web_Server"
+     wait_for:
+             host: "{{ item.public_dns_name }}"
+             port: 22
+             state: started
+     loop: "{{ backend.instances }}"
+
+   - name: "Waiting for SSH service in LB_Server (Load_Balancer)"
+     wait_for:
+          host: "{{ item.public_dns_name }}"
+          port: 22
+          state: started
+     loop: "{{ frontend.instances }}"  
+
+- hosts: httpdserver
+  gather_facts: yes
+  tasks:
+   - name: "Running role for httpdserver"
+     include_role:
+             name: httpdserver
+
+- hosts: lbserver
+  gather_facts: no
+  tasks:
+   - name: "Running role"
+     include_role:
+          name: lbserver
